@@ -89,7 +89,10 @@ public final class StrictBGPPeerRegistry implements BGPPeerRegistry {
         Preconditions.checkNotNull(preferences.getParams());
         Preconditions.checkNotNull(preferences.getBgpId());
         this.peerPreferences.put(ip, preferences);
+        // listeners在其他模块初始化时启动，并注册的
         for (final PeerRegistryListener peerRegistryListener : this.listeners) {
+            // PeerRegistryListenerImpl
+            // 效果是如果preferences中有密码，则设置BGP的密码；如果没md5密码则跳过，因为默认监听channel即可
             peerRegistryListener.onPeerAdded(ip, preferences);
         }
     }
@@ -337,6 +340,7 @@ public final class StrictBGPPeerRegistry implements BGPPeerRegistry {
         }
     }
 
+    // 被BGPPeerAcceptorImpl中的start()中调用 新增listener
     @Override
     public synchronized AutoCloseable registerPeerRegisterListener(final PeerRegistryListener listener) {
         this.listeners.add(listener);

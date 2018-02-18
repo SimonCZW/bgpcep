@@ -18,6 +18,7 @@ import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.bgp.rev151009.bgp.n
  * Common interface for BgpPeer and AppPeer beans
  *
  */
+// 接口，具体实现方法在AppPeer和BgpPeer中看
 public interface PeerBean extends AutoCloseable {
 
     void start(RIB rib, Neighbor neighbor, BGPTableTypeRegistryConsumer tableTypeRegistry, WriteConfiguration configurationWriter);

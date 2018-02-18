@@ -45,9 +45,12 @@ import org.opendaylight.protocol.bgp.rib.spi.state.BGPPeerStateConsumer;
 import org.opendaylight.protocol.concepts.KeyMapping;
 import org.opendaylight.protocol.util.Ipv4Util;
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.bgp.multiprotocol.rev151009.bgp.common.afi.safi.list.AfiSafi;
+// openconfig-api -> openconfig-bgp.yang
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.bgp.rev151009.bgp.neighbor.group.AfiSafis;
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.bgp.rev151009.bgp.neighbors.Neighbor;
+
 import org.opendaylight.yang.gen.v1.urn.ietf.params.xml.ns.yang.ietf.inet.types.rev130715.IpAddress;
+
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.message.rev130919.open.message.BgpParameters;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.message.rev130919.open.message.BgpParametersBuilder;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.message.rev130919.open.message.bgp.parameters.OptionalCapabilities;
@@ -241,14 +244,17 @@ public final class BgpPeer implements PeerBean, BGPPeerStateConsumer, BGPPeerRun
             final AfiSafis afisSAfis = Preconditions.checkNotNull(neighbor.getAfiSafis());
             final Set<TablesKey> afiSafisAdvertized = OpenConfigMappingUtil
                 .toTableKey(afisSAfis.getAfiSafi(), tableTypeRegistry);
+            // 创建BGPPeer实例, BGP底层实现
             this.bgpPeer = new BGPPeer(Ipv4Util.toStringIP(this.neighborAddress), rib,
                 OpenConfigMappingUtil.toPeerRole(neighbor), getSimpleRoutingPolicy(neighbor), BgpPeer.this.rpcRegistry,
                 afiSafisAdvertized, Collections.emptySet());
             final List<BgpParameters> bgpParameters = getBgpParameters(neighbor, rib, tableTypeRegistry);
             final KeyMapping keyMapping = OpenConfigMappingUtil.getNeighborKey(neighbor);
+            // 封装BGP Session相关参数
             this.prefs = new BGPSessionPreferences(rib.getLocalAs(), getHoldTimer(neighbor), rib.getBgpIdentifier(),
                 getPeerAs(neighbor, rib), bgpParameters, getPassword(keyMapping));
             this.activeConnection = OpenConfigMappingUtil.isActive(neighbor);
+            // 通过rib获取dispatcher
             this.dispatcher = rib.getDispatcher();
             this.inetAddress = Ipv4Util.toInetSocketAddress(this.neighborAddress, OpenConfigMappingUtil.getPort(neighbor));
             this.retryTimer = OpenConfigMappingUtil.getRetryTimer(neighbor);
@@ -257,6 +263,7 @@ public final class BgpPeer implements PeerBean, BGPPeerStateConsumer, BGPPeerRun
             this.serviceGroupIdentifier = rib.getRibIServiceGroupIdentifier();
             LOG.info("Peer Singleton Service {} registered", this.serviceGroupIdentifier.getValue());
             //this need to be always the last step
+            // 对应于后面的instantiateServiceInstance()方法被调用，先要register
             this.registration = rib.registerClusterSingletonService(this);
         }
 
@@ -275,8 +282,28 @@ public final class BgpPeer implements PeerBean, BGPPeerStateConsumer, BGPPeerRun
                 this.configurationWriter.apply();
             }
             LOG.info("Peer Singleton Service {} instantiated, Peer {}", getIdentifier().getValue(), this.neighborAddress);
+            // 调用BGPPeer的方法instantiateServiceInstance
             this.bgpPeer.instantiateServiceInstance();
+
+            // BGP Session监听传入neighbor实例
+            /*
+                this.dispatcher ==> org.opendaylight.protocol.bgp.rib.impl.BGPDispatcherImpl
+
+                .getBGPPeerRegistry()返回的是 BGPPeerRegistry (org.opendaylight.protocol.bgp.rib.impl.StrictBGPPeerRegistry)
+
+                .addPeer效果是给
+                    1）在StrictBGPPeerRegistry中登记 this.bgpPeer(BGPPeer)、登记neighbor及prefs配置映射
+                    2）listener中设置channel密码(如果prefs有 BGP md5密码，如果没md5密码则跳过，因为默认监听channel即可)
+                        //listener在org.opendaylight.protocol.bgp.peer.acceptor模块中被注册来监听端口
+             */
             this.dispatcher.getBGPPeerRegistry().addPeer(this.neighborAddress, this.bgpPeer, this.prefs);
+
+            // 关键入口
+            /*
+                this.dispatcher ==> org.opendaylight.protocol.bgp.rib.impl.BGPDispatcherImpl
+
+                .createReconnectingClient() 效果：建立BGP邻居（调用链中处理了发包、BGP协商、状态机等等，实例化BgpSessionImpl）
+             */
             if (this.activeConnection) {
                 this.connection = this.dispatcher.createReconnectingClient(this.inetAddress, this.retryTimer, this.keys);
             }

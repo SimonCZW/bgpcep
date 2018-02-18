@@ -23,8 +23,10 @@ import org.opendaylight.controller.md.sal.dom.api.DOMDataTreeChangeService;
 import org.opendaylight.controller.md.sal.dom.api.DOMDataTreeIdentifier;
 import org.opendaylight.controller.md.sal.dom.api.DOMDataWriteTransaction;
 import org.opendaylight.controller.md.sal.dom.api.DOMTransactionChain;
+// bgp-path-selection-mode  -> api
 import org.opendaylight.protocol.bgp.mode.api.PathSelectionMode;
 import org.opendaylight.protocol.bgp.mode.api.RouteEntry;
+
 import org.opendaylight.protocol.bgp.rib.impl.spi.RIBSupportContextRegistry;
 import org.opendaylight.protocol.bgp.rib.impl.state.rib.TotalPathsCounter;
 import org.opendaylight.protocol.bgp.rib.impl.state.rib.TotalPrefixesCounter;
@@ -109,6 +111,7 @@ final class LocRibWriter implements AutoCloseable, TotalPrefixesCounter, TotalPa
             .node(ATTRIBUTES_UPTODATE_TRUE.getNodeType()), ATTRIBUTES_UPTODATE_TRUE);
         tx.submit();
 
+        // 监听effectiveRibIn
         final YangInstanceIdentifier tableId = this.target.node(Peer.QNAME).node(Peer.QNAME).node(EffectiveRibIn.QNAME)
             .node(Tables.QNAME).node(this.tableKey);
         final DOMDataTreeIdentifier wildcard = new DOMDataTreeIdentifier(LogicalDatastoreType.OPERATIONAL, tableId);
@@ -204,7 +207,10 @@ final class LocRibWriter implements AutoCloseable, TotalPrefixesCounter, TotalPa
         final Map<RouteUpdateKey, RouteEntry> routes) {
         for (final DataTreeCandidateNode child : table.getChildNodes()) {
             LOG.debug("Modification type {}", child.getModificationType());
+            // effitive-rib-in的子节点为 attributes / routes
+            // 如果是attributes
             if ((Attributes.QNAME).equals(child.getIdentifier().getNodeType())) {
+                // child是attributes
                 if (child.getDataAfter().isPresent()) {
                     // putting uptodate attribute in
                     LOG.trace("Uptodate found for {}", child.getDataAfter());
@@ -212,25 +218,32 @@ final class LocRibWriter implements AutoCloseable, TotalPrefixesCounter, TotalPa
                 }
                 continue;
             }
+            // 此处child为routes（effitive-rib-in的)
             updateRoutesEntries(child, peerId, routes);
         }
     }
 
     private void updateRoutesEntries(final DataTreeCandidateNode child, final PeerId peerId, final Map<RouteUpdateKey, RouteEntry> routes) {
         final UnsignedInteger routerId = RouterIds.routerIdForPeerId(peerId);
+        // 获取routes
         final Collection<DataTreeCandidateNode> modifiedRoutes = this.ribSupport.changedRoutes(child);
+        // 轮询routes
         for (final DataTreeCandidateNode route : modifiedRoutes) {
             final PathArgument routeId = this.ribSupport.createRouteKeyPathArgument(route.getIdentifier());
+            // this.routeEntries存的是已经存在的routeEntry(上一次通过best selection)
             RouteEntry entry = this.routeEntries.get(routeId);
+            // after应该是变化后的
             final Optional<NormalizedNode<?, ?>> maybeData = route.getDataAfter();
             final Optional<NormalizedNode<?, ?>> maybeDataBefore = route.getDataBefore();
+            // 变化后是存在路由数据的(新增/改变)
             if (maybeData.isPresent()) {
                 if (entry == null) {
                     entry = createEntry(routeId);
                 }
                 entry.addRoute(routerId, this.ribSupport.extractPathId(maybeData.get()), this.attributesIdentifier, maybeData.get());
                 this.totalPathsCounter.increment();
-            } else if (entry != null) {
+            } else if (entry != null) { //变化后不存在数据了, 且之前的记录routeEntry已存在 -> 删除
+                // 已经存在的路由，被删除
                 this.totalPathsCounter.decrement();
                 if(entry.removeRoute(routerId, this.ribSupport.extractPathId(maybeDataBefore.get()))) {
                     this.routeEntries.remove(routeId);
@@ -244,15 +257,24 @@ final class LocRibWriter implements AutoCloseable, TotalPrefixesCounter, TotalPa
         }
     }
 
+    // 轮询需要更新的路由
     private void walkThrough(final DOMDataWriteTransaction tx, final Set<Map.Entry<RouteUpdateKey, RouteEntry>> toUpdate) {
         for (final Map.Entry<RouteUpdateKey, RouteEntry> e : toUpdate) {
             LOG.trace("Walking through {}", e);
+            // 需要更新的routeEntry
             final RouteEntry entry = e.getValue();
 
+            // ourAs是本地rib实例的as号
+            /*
+                这里实现best select, 会过十三条选路规则
+                    org.opendaylight.protocol.bgp.mode.impl.base.BaseAbstractRouteEntry
+             */
             if (!entry.selectBest(this.ourAs)) {
                 LOG.trace("Best path has not changed, continuing");
                 continue;
             }
+            // 通过了best select的路由才可以写入yang(loc-rib)
+            // org.opendaylight.protocol.bgp.mode.impl.base.BaseAbstractRouteEntry
             entry.updateRoute(this.localTablesKey, this.exportPolicyPeerTracker, this.locRibTarget, this.ribSupport, tx, e.getKey().getRouteId());
         }
     }

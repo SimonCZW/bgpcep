@@ -31,12 +31,15 @@ import org.opendaylight.controller.sal.binding.api.BindingAwareBroker.RpcRegistr
 import org.opendaylight.controller.sal.binding.api.RpcProviderRegistry;
 import org.opendaylight.yang.gen.v1.urn.ietf.params.xml.ns.yang.ietf.inet.types.rev130715.Ipv4Address;
 import org.opendaylight.yang.gen.v1.urn.ietf.params.xml.ns.yang.ietf.inet.types.rev130715.Ipv4Prefix;
+// inet -> bgp-inet.yang
+// augment情况使用:
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.inet.rev150305.application.rib.tables.routes.Ipv4RoutesCaseBuilder;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.inet.rev150305.ipv4.routes.Ipv4Routes;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.inet.rev150305.ipv4.routes.Ipv4RoutesBuilder;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.inet.rev150305.ipv4.routes.ipv4.routes.Ipv4Route;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.inet.rev150305.ipv4.routes.ipv4.routes.Ipv4RouteBuilder;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.inet.rev150305.ipv4.routes.ipv4.routes.Ipv4RouteKey;
+// parser-api -> bgp-message.yang
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.message.rev130919.PathId;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.message.rev130919.path.attributes.Attributes;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.message.rev130919.path.attributes.AttributesBuilder;
@@ -48,13 +51,16 @@ import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.mess
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.message.rev130919.path.attributes.attributes.MultiExitDiscBuilder;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.message.rev130919.path.attributes.attributes.Origin;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.message.rev130919.path.attributes.attributes.OriginBuilder;
+// rib-api -> bgp-rib.yang
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.ApplicationRib;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.ApplicationRibBuilder;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.ApplicationRibId;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.ApplicationRibKey;
+    // grouping rib -> list table
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.rib.Tables;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.rib.TablesBuilder;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.rib.TablesKey;
+
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.types.rev130919.BgpOrigin;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.types.rev130919.Ipv4AddressFamily;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.types.rev130919.UnicastSubsequentAddressFamily;
@@ -80,10 +86,15 @@ public class AppPeerBenchmark implements OdlBgpAppPeerBenchmarkService, Transact
 
     private static final Logger LOG = LoggerFactory.getLogger(AppPeerBenchmark.class);
 
+    // 路由属性，base
     private static final AsPath AS_PATH = new AsPathBuilder().build();
     private static final Origin ORIGIN = new OriginBuilder().setValue(BgpOrigin.Igp).build();
     private static final MultiExitDisc MED = new MultiExitDiscBuilder().setMed(0L).build();
     private static final LocalPref LOC_PREF = new LocalPrefBuilder().setPref(100L).build();
+
+    // 设置table的address-family
+    // 设置route case（这里使用了augment情况）,这里是application.rib.tables.routes.Ipv4RoutesCaseBuilder
+    // importance可参考
     private static final List<Tables> EMPTY_TABLES = Collections.singletonList(new TablesBuilder()
         .setAfi(Ipv4AddressFamily.class).setSafi(UnicastSubsequentAddressFamily.class).setRoutes(
             new Ipv4RoutesCaseBuilder().setIpv4Routes(new Ipv4RoutesBuilder().setIpv4Route(Collections.emptyList())
@@ -96,30 +107,42 @@ public class AppPeerBenchmark implements OdlBgpAppPeerBenchmarkService, Transact
 
     private final BindingTransactionChain txChain;
     private final RpcRegistration<OdlBgpAppPeerBenchmarkService> rpcRegistration;
+    // application rib
     private final InstanceIdentifier<ApplicationRib> appIID;
     private final InstanceIdentifier<Ipv4Routes> routesIId;
     private final String appRibId;
 
+    // 传入databroker / rpc / yang中配置的app-peer-id(ipv4)
     public AppPeerBenchmark(final DataBroker bindingDataBroker, final RpcProviderRegistry rpcProviderRegistry,
             final String appRibId) {
         this.appRibId = Preconditions.checkNotNull(appRibId);
         this.txChain = bindingDataBroker.createTransactionChain(this);
 
+        // build application-rib, 直接传入了ipv4来构造
         this.appIID = InstanceIdentifier.builder(ApplicationRib.class,
             new ApplicationRibKey(new ApplicationRibId(appRibId))).build();
+
+        // 从application-rib -> table -> route ：注入路由路径
+        // build tableIId
         final InstanceIdentifier tablesIId = this.appIID
                 .child(Tables.class, new TablesKey(Ipv4AddressFamily.class, UnicastSubsequentAddressFamily.class));
+        // build routesIId
         this.routesIId = tablesIId.child(Ipv4Routes.class);
+
+        //// 注册rpc
         this.rpcRegistration = rpcProviderRegistry.addRpcImplementation(OdlBgpAppPeerBenchmarkService.class, this);
         LOG.info("BGP Application Peer Benchmark Application started.");
     }
 
+    // 创建一个空表的application rib实例
     public void start() {
         LOG.debug("Instantiating App Peer Benchmark : {}", this.appRibId);
+        // build application rib, 设置tables
         final ApplicationRib appRib = new ApplicationRibBuilder().setId(new ApplicationRibId(
             new ApplicationRibId(this.appRibId))).setTables(EMPTY_TABLES).build();
 
         final WriteTransaction wTx = this.txChain.newWriteOnlyTransaction();
+        // 写param: configuration instanceId object
         wTx.put(LogicalDatastoreType.CONFIGURATION, this.appIID, appRib);
         Futures.addCallback(wTx.submit(), new FutureCallback<Void>() {
             @Override
@@ -148,8 +171,10 @@ public class AppPeerBenchmark implements OdlBgpAppPeerBenchmarkService, Transact
         LOG.debug("DatastoreBaAbstractWrite closed successfully, chain {}", chain);
     }
 
+    // 注册了的rpc服务 add-prefix
     @Override
     public Future<RpcResult<AddPrefixOutput>> addPrefix(final AddPrefixInput input) {
+        // rpc输入
         final long duration = addRoute(input.getPrefix(), input.getNexthop(), input.getCount(), input.getBatchsize());
         final long rate = countRate(duration, input.getCount());
 
@@ -159,8 +184,10 @@ public class AppPeerBenchmark implements OdlBgpAppPeerBenchmarkService, Transact
         return RpcResultBuilder.success(output).buildFuture();
     }
 
+    // 注册了的rpc服务 delete-prefix
     @Override
     public Future<RpcResult<DeletePrefixOutput>> deletePrefix(final DeletePrefixInput input) {
+        // rpc输入
         final long duration = deleteRoute(input.getPrefix(), input.getCount(), input.getBatchsize());
         final long rate = countRate(duration, input.getCount());
 
@@ -190,6 +217,8 @@ public class AppPeerBenchmark implements OdlBgpAppPeerBenchmarkService, Transact
     }
 
     private long addRoute(final Ipv4Prefix ipv4Prefix, final Ipv4Address nextHop, final long count, final long batch) {
+        // build 注入路由的属性
+        // 注意前面设置的MED, LOC_PREF, ORIGIN, AS_PATH等信息
         final AttributesBuilder attributesBuilder = new AttributesBuilder();
         attributesBuilder.setCNextHop(new Ipv4NextHopCaseBuilder().setIpv4NextHop(
                 new Ipv4NextHopBuilder().setGlobal(new Ipv4Address(nextHop)).build()).build());
@@ -198,6 +227,7 @@ public class AppPeerBenchmark implements OdlBgpAppPeerBenchmarkService, Transact
         attributesBuilder.setOrigin(ORIGIN);
         attributesBuilder.setAsPath(AS_PATH);
         final Attributes attributes = attributesBuilder.build();
+        // build 路由
         return processRoutes(ipv4Prefix, count, batch, attributes);
     }
 
@@ -207,17 +237,25 @@ public class AppPeerBenchmark implements OdlBgpAppPeerBenchmarkService, Transact
 
     private long processRoutes(final Ipv4Prefix ipv4Prefix, final long count, final long batch, final Attributes attributes) {
         WriteTransaction wTx = this.txChain.newWriteOnlyTransaction();
+        // 干掉掩码,只拿ip prefix
         String address = getAdddressFromPrefix(ipv4Prefix);
-        final Stopwatch stopwatch = Stopwatch.createStarted();
+        final Stopwatch stopwatch = Stopwatch.createStarted(); //??
+        // rpc输入的count
         for (int i = 1; i <= count; i++) {
+            // 创建路由过程
+            // ----------
+            // yang中 ipv4-route key为: key "prefix path-id"
             final Ipv4RouteKey routeKey = new Ipv4RouteKey(PATH_ID, createPrefix(address));
+            // 通过已创建的routeKey, 创建routeIId (一条路由的instance id)
             final KeyedInstanceIdentifier<Ipv4Route, Ipv4RouteKey> routeIId = this.routesIId.child(Ipv4Route.class, routeKey);
             if (attributes != null) {
+                // 创建路由
                 final Ipv4RouteBuilder ipv4RouteBuilder = new Ipv4RouteBuilder();
                 ipv4RouteBuilder.setPrefix(routeKey.getPrefix());
                 ipv4RouteBuilder.setKey(routeKey);
                 ipv4RouteBuilder.setAttributes(attributes);
                 final Ipv4Route ipv4Route = ipv4RouteBuilder.build();
+                // 写路由到yang tree
                 wTx.put(LogicalDatastoreType.CONFIGURATION, routeIId,
                         ipv4Route);
             } else {
@@ -227,10 +265,11 @@ public class AppPeerBenchmark implements OdlBgpAppPeerBenchmarkService, Transact
                 wTx.submit();
                 wTx = this.txChain.newWriteOnlyTransaction();
             }
+            // 根据count，下多条32位路由
             address = increasePrefix(address);
         }
         wTx.submit();
-        return stopwatch.stop().elapsed(TimeUnit.MILLISECONDS);
+        return stopwatch.stop().elapsed(TimeUnit.MILLISECONDS); //??
     }
 
     private static long countRate(final long durationMillis, final long count) {
@@ -253,6 +292,7 @@ public class AppPeerBenchmark implements OdlBgpAppPeerBenchmarkService, Transact
         return prefix.getValue().split(SLASH)[0];
     }
 
+    // 获取一个Ipv4Prefix类型的object
     private static Ipv4Prefix createPrefix(final String address) {
         return new Ipv4Prefix(address + PREFIX);
     }

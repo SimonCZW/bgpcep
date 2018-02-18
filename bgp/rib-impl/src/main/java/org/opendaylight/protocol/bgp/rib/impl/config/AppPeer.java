@@ -29,6 +29,7 @@ import org.opendaylight.protocol.bgp.rib.spi.state.BGPPeerStateConsumer;
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.bgp.rev151009.bgp.neighbor.group.Config;
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.bgp.rev151009.bgp.neighbors.Neighbor;
 import org.opendaylight.yang.gen.v1.urn.ietf.params.xml.ns.yang.ietf.inet.types.rev130715.Ipv4Address;
+// rib-api -> bgp-rib.yang
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.ApplicationRib;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.ApplicationRibId;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.rib.Tables;
@@ -124,6 +125,7 @@ public final class AppPeer implements PeerBean, BGPPeerStateConsumer {
 
         BgpAppPeerSingletonService(final RIB rib, final ApplicationRibId appRibId, final Ipv4Address neighborAddress,
             final WriteConfiguration configurationWriter) {
+            // 实例化ApplicationPeer
             this.applicationPeer = new ApplicationPeer(appRibId, neighborAddress, rib);
             this.appRibId = appRibId;
             this.dataTreeChangeService = rib.getService();
@@ -131,6 +133,7 @@ public final class AppPeer implements PeerBean, BGPPeerStateConsumer {
             this.configurationWriter = configurationWriter;
             LOG.info("Application Peer Singleton Service {} registered, Application peer {}",
                 getIdentifier().getValue(), this.appRibId.getValue());
+            // 注册自身服务，实例化服务时调用后面方法 instantiateServiceInstance 、 closeServiceInstance
             //this need to be always the last step
             this.singletonServiceRegistration = rib.registerClusterSingletonService(this);
         }
@@ -153,6 +156,7 @@ public final class AppPeer implements PeerBean, BGPPeerStateConsumer {
                 getIdentifier().getValue(), this.appRibId.getValue());
             final YangInstanceIdentifier yangIId = YangInstanceIdentifier.builder().node(ApplicationRib.QNAME)
                 .nodeWithKey(ApplicationRib.QNAME, APP_ID_QNAME, this.appRibId.getValue()).node(Tables.QNAME).node(Tables.QNAME).build();
+            // 调用构造器时实例化的 ApplicationPeer的方法instantiateServiceInstance
             this.applicationPeer.instantiateServiceInstance(this.dataTreeChangeService,
                 new DOMDataTreeIdentifier(LogicalDatastoreType.CONFIGURATION, yangIId));
         }

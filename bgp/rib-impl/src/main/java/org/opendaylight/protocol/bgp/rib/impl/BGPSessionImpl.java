@@ -502,6 +502,7 @@ public class BGPSessionImpl extends SimpleChannelInboundHandler<Notification> im
 
     @Override
     public void registerMessagesCounter(final BGPMessagesListener bgpMessagesListener) {
+        // BGPSessionStateImpl
         this.sessionState.registerMessagesCounter(bgpMessagesListener);
     }
 }

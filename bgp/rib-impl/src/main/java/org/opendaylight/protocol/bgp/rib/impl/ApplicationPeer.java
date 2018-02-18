@@ -103,13 +103,17 @@ public class ApplicationPeer extends BGPPeerStateImpl implements org.opendayligh
     }
 
     public ApplicationPeer(final ApplicationRibId applicationRibId, final Ipv4Address ipAddress, final RIB rib) {
+        // group-id 设置为application-peers，BGPPeer中为null
         super(rib.getInstanceIdentifier(), "application-peers", new IpAddress(ipAddress), rib.getLocalTablesKeys(),
             Collections.emptySet());
         this.name = applicationRibId.getValue();
         final RIB targetRib = Preconditions.checkNotNull(rib);
         this.rawIdentifier = InetAddresses.forString(ipAddress.getValue()).getAddress();
+        // 通过neighborAddress 获取peerId
         final NodeIdentifierWithPredicates peerId = IdentifierUtils.domPeerId(RouterIds.createPeerId(ipAddress));
+        // 获取peer instance id(邻居的)
         this.peerIId = targetRib.getYangRibId().node(Peer.QNAME).node(peerId);
+        // 通过peerIId获取其adj-rib-in table id（理解：可以直接写入peer adj-rib-in路由）
         this.adjRibsInId = this.peerIId.node(AdjRibIn.QNAME).node(Tables.QNAME);
         this.rib = targetRib;
         this.ipAddress = ipAddress;
@@ -122,8 +126,10 @@ public class ApplicationPeer extends BGPPeerStateImpl implements org.opendayligh
 
         final Optional<SimpleRoutingPolicy> simpleRoutingPolicy = Optional.of(SimpleRoutingPolicy.AnnounceNone);
         final PeerId peerId = RouterIds.createPeerId(this.ipAddress);
+        // rib支持table?
         final Set<TablesKey> localTables = this.rib.getLocalTablesKeys();
         localTables.forEach(tablesKey -> {
+            // 将peer注册到 export policy tracker跟踪
             final ExportPolicyPeerTracker exportTracker = this.rib.getExportPolicyPeerTracker(tablesKey);
             if (exportTracker != null) {
                 exportTracker.registerPeer(peerId, null, this.peerIId, PeerRole.Internal, simpleRoutingPolicy);
@@ -132,8 +138,11 @@ public class ApplicationPeer extends BGPPeerStateImpl implements org.opendayligh
         });
         setAdvertizedGracefulRestartTableTypes(Collections.emptyList());
 
+        // 创建 adj rib in writer, peerRole类型是intenral
         this.adjRibInWriter = AdjRibInWriter.create(this.rib.getYangRibId(), PeerRole.Internal, simpleRoutingPolicy, this.writerChain);
+
         final RIBSupportContextRegistry context = this.rib.getRibSupportContext();
+        // 监听 application YANG 中table变化
         final RegisterAppPeerListener registerAppPeerListener = () -> {
             synchronized (this) {
                 if(this.chain != null) {
@@ -141,9 +150,18 @@ public class ApplicationPeer extends BGPPeerStateImpl implements org.opendayligh
                 }
             }
         };
+        // 创建application peer的 adj-rib-in adj-rib-out table
         this.adjRibInWriter = this.adjRibInWriter.transform(peerId, context, localTables, Collections.emptyMap(),
             registerAppPeerListener);
+
+        // 实例化BGPPeerStateImpl
         final BGPPeerStats peerStats = new BGPPeerStatsImpl(this.name, localTables, this);
+
+        // 创建 effective rib in writer
+        /*
+            	1. 根据peer类型(ebgp/igbp/rr-client/internal)，映射到不同的import policy（具体可参考`org.opendaylight.protocol.bgp.rib.impl.PolicyDatabase`）
+	            2. 实例化内部类对象`AdjInTracker`，效果是监听adj-rib-in的YANG变化，通过对应import policy（上面绑定映射）过滤后（比如external peer的话不学习相同as路由），再写入effective-rib-in
+         */
         this.effectiveRibInWriter = EffectiveRibInWriter.create(this.rib.getService(), this.rib.createPeerChain(this), this.peerIId,
             this.rib.getImportPolicyPeerTracker(), context, PeerRole.Internal,
             peerStats.getAdjRibInRouteCounters(), localTables);
@@ -156,6 +174,7 @@ public class ApplicationPeer extends BGPPeerStateImpl implements org.opendayligh
      * method, it doesn't matter if the routes are removed or added, this will
      * be determined in LocRib.
      */
+    // 监听application rib YANG变化
     @Override
     public synchronized void onDataTreeChanged(final Collection<DataTreeCandidate> changes) {
         if(this.chain == null) {
@@ -164,33 +183,47 @@ public class ApplicationPeer extends BGPPeerStateImpl implements org.opendayligh
         }
         final DOMDataWriteTransaction tx = this.chain.newWriteOnlyTransaction();
         LOG.debug("Received data change to ApplicationRib {}", changes);
+        // 轮询变化
         for (final DataTreeCandidate tc : changes) {
             LOG.debug("Modification Type {}", tc.getRootNode().getModificationType());
             final YangInstanceIdentifier path = tc.getRootPath();
             final PathArgument lastArg = path.getLastPathArgument();
             Verify.verify(lastArg instanceof NodeIdentifierWithPredicates, "Unexpected type %s in path %s", lastArg.getClass(), path);
             final NodeIdentifierWithPredicates tableKey = (NodeIdentifierWithPredicates) lastArg;
+            // 过滤不支持tableKey（address family）
             if (!this.supportedTables.contains(tableKey)) {
                 LOG.trace("Skipping received data change for non supported family {}.", tableKey);
                 continue;
             }
+            // 轮询变化的路由
             for (final DataTreeCandidateNode child : tc.getRootNode().getChildNodes()) {
+                // child可能是：safi/afi/attribute/routes
                 final PathArgument childIdentifier = child.getIdentifier();
+
+                // this.adjRibsInId是 neighbor(peer)的adj-rib-in
+                // 即本地application-rib路由变化，直接修改peer(neighbor)的adj-rib-in
+                // tableId是 adj-rib-in -> tables -> safi/afi/attribute/routes
                 final YangInstanceIdentifier tableId = this.adjRibsInId.node(tableKey).node(childIdentifier);
                 switch (child.getModificationType()) {
                 case DELETE:
                     LOG.trace("App peer -> AdjRibsIn path delete: {}", childIdentifier);
+                    // 直接删除adj-rib-in的子项 safi/afi/attribute/routes
+                    // 单条路由删除在SUBTREE_MODIFIED中体现, 而不是在这里
                     tx.delete(LogicalDatastoreType.OPERATIONAL, tableId);
                     break;
                 case UNMODIFIED:
                     // No-op
                     break;
+                //子树变化(routes时子树)
                 case SUBTREE_MODIFIED:
+                    // 判断chidIdentifier是 routes, 而不是safi/afi/attribute
                     if (EffectiveRibInWriter.TABLE_ROUTES.equals(childIdentifier)) {
+                        // 是routes变化，调用处理路由, 在里面有路由删除的处理
                         processRoutesTable(child, tableId, tx, tableId);
                         break;
                     }
                 case WRITE:
+                    // 写入新增数据
                     if (child.getDataAfter().isPresent()) {
                         final NormalizedNode<?,?> dataAfter = child.getDataAfter().get();
                         LOG.trace("App peer -> AdjRibsIn path : {}", tableId);
@@ -213,8 +246,10 @@ public class ApplicationPeer extends BGPPeerStateImpl implements org.opendayligh
      * @param tx
      * @param routeTableIdentifier
      */
+    // 单条路由变化
     private synchronized void processRoutesTable(final DataTreeCandidateNode node, final YangInstanceIdentifier identifier,
             final DOMDataWriteTransaction tx, final YangInstanceIdentifier routeTableIdentifier) {
+        // 获取routes的child -> container ipv4-routes
         for (final DataTreeCandidateNode child : node.getChildNodes()) {
             final YangInstanceIdentifier childIdentifier = identifier.node(child.getIdentifier());
             switch (child.getModificationType()) {
@@ -229,6 +264,8 @@ public class ApplicationPeer extends BGPPeerStateImpl implements org.opendayligh
                 //For be ables to use DELETE when we remove specific routes as we do when we remove the whole routes,
                 // we need to go deeper three levels
                 if (!routeTableIdentifier.equals(childIdentifier.getParent().getParent().getParent())) {
+                    // 再递归 routes -> container ipv4-routes
+                    //                                  -> ipv4-route(单条路由)
                     processRoutesTable(child, childIdentifier, tx, routeTableIdentifier);
                     break;
                 }

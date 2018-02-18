@@ -44,6 +44,7 @@ import org.slf4j.LoggerFactory;
 
 @NotThreadSafe
 public final class BestPathStateImpl implements BestPathState {
+    // 解析路由的attribute
     private static final class NamespaceSpecificIds {
         private final Collection<PathArgument> asPath;
         private final Collection<PathArgument> locPref;
@@ -111,9 +112,11 @@ public final class BestPathStateImpl implements BestPathState {
     private BgpOrigin origin;
     private boolean resolved;
 
+    // 构造器
     public BestPathStateImpl(final ContainerNode attributes) {
         final NamespaceSpecificIds col;
         try {
+            //从缓存path获取attribute，若不存在则实例化new NamespaceSpecificIds(attributes.getNodeType())
             col = PATH_CACHE.get(attributes.getNodeType().getModule(), () -> new NamespaceSpecificIds(attributes.getNodeType()));
         } catch (final ExecutionException e) {
             LOG.error("Error creating namespace-specific attributes collection.", e);
@@ -122,6 +125,7 @@ public final class BestPathStateImpl implements BestPathState {
 
         this.attributes = Preconditions.checkNotNull(attributes);
         this.ids = col;
+        // 解析路由的attributr
         resolveValues();
     }
 

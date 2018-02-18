@@ -61,6 +61,7 @@ final class ExportPolicyPeerTrackerImpl implements ExportPolicyPeerTracker {
         final PeerExportGroupRegistry peerExp = this.groups.computeIfAbsent(peerRole,
             k -> new PeerExportGroupImpl(this.policyDatabase.exportPolicyForRole(peerRole)));
 
+        // peer export group添加peer信息
         final AbstractRegistration registration = peerExp.registerPeer(peerId, new PeerExporTuple(peerPath, peerRole));
 
         return new AbstractRegistration() {

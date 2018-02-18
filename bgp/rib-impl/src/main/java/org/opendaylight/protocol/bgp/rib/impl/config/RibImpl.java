@@ -93,6 +93,7 @@ public final class RibImpl implements RIB, BGPRIBStateConsumer, AutoCloseable {
         this.domSchemaService = domSchemaService;
     }
 
+    // 入口
     void start(final Global global, final String instanceName, final BGPTableTypeRegistryConsumer tableTypeRegistry,
         final BgpDeployer.WriteConfiguration configurationWriter) {
         Preconditions.checkState(this.ribImpl == null, "Previous instance %s was not closed.", this);
@@ -241,6 +242,7 @@ public final class RibImpl implements RIB, BGPRIBStateConsumer, AutoCloseable {
         this.clusterId = getClusterIdentifier(globalConfig);
         final Map<TablesKey, PathSelectionMode> pathSelectionModes = OpenConfigMappingUtil.toPathSelectionMode(this.afiSafi, tableTypeRegistry).entrySet()
                 .stream().collect(Collectors.toMap(entry -> new TablesKey(entry.getKey().getAfi(), entry.getKey().getSafi()), Map.Entry::getValue));
+        // 实例化对象
         return new RIBImpl(this.provider, new RibId(bgpInstanceName), this.asNumber, new BgpId(this.routerId), this.clusterId,
                 this.extensions, this.dispatcher, this.codecTreeFactory, this.domBroker, toTableTypes(this.afiSafi, tableTypeRegistry), pathSelectionModes,
                 this.extensions.getClassLoadingStrategy(), configurationWriter);

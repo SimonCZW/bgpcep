@@ -31,6 +31,7 @@ final class ImportPolicyPeerTrackerImpl implements ImportPolicyPeerTracker {
         this.policyDatabase = Preconditions.checkNotNull(policyDatabase);
     }
 
+    // 根据PeerRole(ebgp/igbp/rr-client/internal)，给peer绑定到import policy(映射)
     @Override
     public void peerRoleChanged(final YangInstanceIdentifier peerPath, final PeerRole role) {
         final PeerId peer = IdentifierUtils.peerId((NodeIdentifierWithPredicates) peerPath.getLastPathArgument());
@@ -47,6 +48,7 @@ final class ImportPolicyPeerTrackerImpl implements ImportPolicyPeerTracker {
         }
     }
 
+    // 获取peer对应policy
     @Override
     public AbstractImportPolicy policyFor(final PeerId peerId) {
         LOG.trace("Peer ID : {}", peerId);

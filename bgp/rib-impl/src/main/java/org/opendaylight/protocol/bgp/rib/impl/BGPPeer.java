@@ -171,6 +171,7 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
         return future;
     }
 
+    // message顶层入口
     @Override
     public void onMessage(final BGPSession session, final Notification msg) throws BGPDocumentedException {
         if (!(msg instanceof Update) && !(msg instanceof RouteRefresh)) {
@@ -184,10 +185,12 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
         }
     }
 
+    // 先删除adj-rib-out listener，再重新创建
     private void onRouteRefreshMessage(final RouteRefresh message, final BGPSession session) {
         final Class<? extends AddressFamily> rrAfi = message.getAfi();
         final Class<? extends SubsequentAddressFamily> rrSafi = message.getSafi();
 
+        // 根据afi和safi创建tableKey
         final TablesKey key = new TablesKey(rrAfi, rrSafi);
         final AdjRibOutListener listener = this.adjRibOutListenerSet.get(key);
         if (listener != null) {
@@ -230,14 +233,17 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
         final Attributes attrs = message.getAttributes();
         MpReachNlri mpReach = null;
         final boolean isAnyNlriAnnounced = message.getNlri() != null;
+        // 有路由发送过来 nlri, 通过消息创建MpReachNlri对象(设置prefix等等)
         if (isAnyNlriAnnounced) {
             mpReach = prefixesToMpReach(message);
         } else {
             mpReach = MessageUtil.getMpReachNlri(attrs);
         }
         if (mpReach != null) {
+            // update路由到adj-rib-in
             this.ribWriter.updateRoutes(mpReach, nextHopToAttribute(attrs, mpReach));
         }
+        // 处理需要删除的路由
         MpUnreachNlri mpUnreach = null;
         if (message.getWithdrawnRoutes() != null) {
             mpUnreach = prefixesToMpUnreach(message, isAnyNlriAnnounced);
@@ -245,6 +251,7 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
             mpUnreach = MessageUtil.getMpUnreachNlri(attrs);
         }
         if (mpUnreach != null) {
+            // 从adj-rib-in删除路由
             this.ribWriter.removeRoutes(mpUnreach);
         }
     }
@@ -264,6 +271,7 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
      * @param message Update message containing prefixes in NLRI
      * @return MpReachNlri with prefixes from the nlri field
      */
+    // build MpReachNlri对象,设定prefiexs,destianationType,addressFamily等
     private static MpReachNlri prefixesToMpReach(final Update message) {
         final List<Ipv4Prefixes> prefixes = new ArrayList<>();
         for (final Ipv4Prefix p : message.getNlri().getNlri()) {
@@ -274,6 +282,7 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
                         new AdvertizedRoutesBuilder().setDestinationType(
                                 new DestinationIpv4CaseBuilder().setDestinationIpv4(
                                         new DestinationIpv4Builder().setIpv4Prefixes(prefixes).build()).build()).build());
+        //获取c-next-hop
         if (message.getAttributes() != null) {
             b.setCNextHop(message.getAttributes().getCNextHop());
         }
@@ -287,14 +296,17 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
      * @param isAnyNlriAnnounced
      * @return MpUnreachNlri with prefixes from the withdrawn routes field
      */
+    // 处理需要删除的路由，创建MyUnreachNlri对象
     private static MpUnreachNlri prefixesToMpUnreach(final Update message, final boolean isAnyNlriAnnounced) {
         final List<Ipv4Prefixes> prefixes = new ArrayList<>();
         for (final Ipv4Prefix p : message.getWithdrawnRoutes().getWithdrawnRoutes()) {
             boolean nlriAnounced = false;
+            // 判断nlri包不包含需要删除的路由
             if(isAnyNlriAnnounced) {
+                // 如果包含了则不删除
                 nlriAnounced = message.getNlri().getNlri().contains(p);
             }
-
+            // nlri不包含需要删除的路由(withdrawn),加到prefixes后面创建对象
             if(!nlriAnounced) {
                 prefixes.add(new Ipv4PrefixesBuilder().setPrefix(p).build());
             }
@@ -308,6 +320,16 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
     @Override
     public synchronized void onSessionUp(final BGPSession session) {
         this.session = session;
+        /*
+            session对象是 -> BGPSessionImpl
+            效果：设置BGPSessionStateImpl中 this.messagesListenerCounter是自己(this)
+                 其实就是设置状态相关类
+
+            问题：BGPPeer是 BGPMessagesListener类型？
+                BGPPeer继承BGPPeerStateImpl, BGPPeerStateImpl是BGPMessagesListener，且实现了方法messageSent、messageReceived，
+                在BGPSessionStateImpl中会调用messageSent、messageReceived
+
+         */
         if (this.session instanceof BGPSessionStateProvider) {
             ((BGPSessionStateProvider) this.session).registerMessagesCounter(this);
         }
@@ -328,11 +350,13 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
         this.peerIId = this.rib.getYangRibId().node(org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.bgp.rib.rib.Peer.QNAME)
             .node(IdentifierUtils.domPeerId(peerId));
 
+        // 如果不是 announceNone, 创建adjRibOutListener
         if(!announceNone) {
             createAdjRibOutListener(peerId);
         }
         this.tables.forEach(tablesKey -> {
             final ExportPolicyPeerTracker exportTracker = this.rib.getExportPolicyPeerTracker(tablesKey);
+            // 将peer注册到exportTracker（export policy追踪/跟进)
             if (exportTracker != null) {
                 this.tableRegistration.add(exportTracker.registerPeer(peerId, addPathTableMaps.get(tablesKey), this.peerIId, this.peerRole,
                     this.simpleRoutingPolicy));
@@ -340,12 +364,21 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
         });
         addBgp4Support(peerId, announceNone);
 
+        // 如果不是 learnNone, 创建effectiveRibInWriter
         if(!isLearnNone(this.simpleRoutingPolicy)) {
+            /*
+            	1. 根据peer类型(ebgp/igbp/rr-client/internal)，映射到不同的import policy（具体可参考`org.opendaylight.protocol.bgp.rib.impl.PolicyDatabase`）
+	            2. 实例化内部类对象`AdjInTracker`，效果是监听adj-rib-in的YANG变化，通过对应import policy（上面绑定映射）过滤后（比如external peer的话不学习相同as路由），再写入effective-rib-in
+             */
             this.effRibInWriter = EffectiveRibInWriter.create(this.rib.getService(), this.rib.createPeerChain(this),
                 this.peerIId, this.rib.getImportPolicyPeerTracker(), this.rib.getRibSupportContext(), this.peerRole,
                 this.peerStats.getAdjRibInRouteCounters(), this.tables);
             registerPrefixesCounters(this.effRibInWriter, this.effRibInWriter);
         }
+        /*
+            ribWriter是 adj-rib-in，在instantiateServiceInstance()调用时，创建了
+            这里效果：创建adj-rib-in adj-rib-out table
+         */
         this.ribWriter = this.ribWriter.transform(peerId, this.rib.getRibSupportContext(), this.tables, addPathTableMaps);
 
         // register BGP Peer stats
@@ -354,7 +387,12 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
             this.runtimeReg = this.registrator.register(this);
         }
 
+        // 注册rpc
         if (this.rpcRegistry != null) {
+            /*
+                注册RPC，BgpPeerRpc.java 包含方法：
+                    1）routeRefreshRequest rpc
+             */
             this.rpcRegistration = this.rpcRegistry.addRoutedRpcImplementation(BgpPeerRpcService.class, new BgpPeerRpc(session, this.tables));
             final KeyedInstanceIdentifier<org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.bgp.rib.rib.Peer, PeerKey> path =
                     this.rib.getInstanceIdentifier().child(org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.rib.rev130925.bgp.rib.rib.Peer.class, new PeerKey(peerId));
@@ -364,6 +402,7 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
         this.rib.getRenderStats().getConnectedPeerCounter().increment();
     }
 
+    // 轮询tables 创建每个table adj-rib-out-listener
     private void createAdjRibOutListener(final PeerId peerId) {
         this.tables.forEach(key->createAdjRibOutListener(peerId, key, true));
     }
@@ -381,7 +420,9 @@ public class BGPPeer extends BGPPeerStateImpl implements BGPSessionListener, Pee
 
         // not particularly nice
         if (context != null && this.session instanceof BGPSessionImpl) {
+            // limiter用于控制session channel output写和flush
             final ChannelOutputLimiter limiter = ((BGPSessionImpl) this.session).getLimiter();
+            // 创建adj-rib-out listener
             final AdjRibOutListener adjRibOut = AdjRibOutListener.create(peerId, key,
                 this.rib.getYangRibId(), this.rib.getCodecsRegistry(), context.getRibSupport(),
                 this.rib.getService(), limiter, mpSupport, this.peerStats.getAdjRibOutRouteCounters().init(key));

@@ -66,12 +66,15 @@ public class AbstractBestPathSelector {
          * FIXME: for eBGP cases (when the LOCAL_PREF is missing), we should assign a policy-based preference
          *        before we ever get here.
          */
+        // 如果本来最优路由属性不存在localPref,新的路由属性存在localpref 则返回新路由更优
         if (this.bestState.getLocalPref() == null && state.getLocalPref() != null) {
             return true;
         }
+        // 如果本来最优路由属性存在localPref,新的路由属性不存在localpref 则返回新路由次优
         if (this.bestState.getLocalPref() != null && state.getLocalPref() == null) {
             return false;
         }
+        // local pref, 越大越优
         if (state.getLocalPref() != null && state.getLocalPref() > this.bestState.getLocalPref()) {
             return false;
         }
@@ -82,6 +85,7 @@ public class AbstractBestPathSelector {
         // - we assume that all paths are learned
 
         // 4. prefer the path with the shortest AS_PATH.
+        // as_path越短越优
         if (this.bestState.getAsPathLength() != state.getAsPathLength()) {
             return this.bestState.getAsPathLength() < state.getAsPathLength();
         }

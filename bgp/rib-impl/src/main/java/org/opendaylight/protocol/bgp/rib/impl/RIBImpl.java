@@ -123,6 +123,7 @@ public final class RIBImpl extends BGPRIBStateImpl implements ClusterSingletonSe
         final BindingCodecTreeFactory codecFactory, final DOMDataBroker domDataBroker, final List<BgpTableType> localTables,
         @Nonnull final Map<TablesKey, PathSelectionMode> bestPathSelectionStrategies, final GeneratedClassLoadingStrategy classStrategy,
         final BgpDeployer.WriteConfiguration configurationWriter) {
+        // 各种变量初始化赋值
         super(InstanceIdentifier.create(BgpRib.class).child(Rib.class, new RibKey(Preconditions.checkNotNull(ribId))),
             localBgpId, localAs);
         this.localAs = Preconditions.checkNotNull(localAs);
@@ -133,20 +134,31 @@ public final class RIBImpl extends BGPRIBStateImpl implements ClusterSingletonSe
         this.domDataBroker = Preconditions.checkNotNull(domDataBroker);
         this.service = this.domDataBroker.getSupportedExtensions().get(DOMDataTreeChangeService.class);
         this.extensions = Preconditions.checkNotNull(extensions);
+
+        // 实例化 org.opendaylight.protocol.bgp.rib.impl.CodecsRegistryImpl
         this.codecsRegistry = CodecsRegistryImpl.create(codecFactory, classStrategy);
+
+        // 实例化 org.opendaylight.protocol.bgp.rib.impl.RIBSupportContextRegistryImpl
         this.ribContextRegistry = RIBSupportContextRegistryImpl.create(extensions, this.codecsRegistry);
+
         final InstanceIdentifierBuilder yangRibIdBuilder = YangInstanceIdentifier.builder().node(BgpRib.QNAME).node(Rib.QNAME);
         this.yangRibId = yangRibIdBuilder.nodeWithKey(Rib.QNAME, RIB_ID_QNAME, ribId.getValue()).build();
         this.bestPathSelectionStrategies = Preconditions.checkNotNull(bestPathSelectionStrategies);
         final ClusterIdentifier cId = clusterId == null ? new ClusterIdentifier(localBgpId) : clusterId;
+
         this.ribId = ribId;
+
+        // 实例化 export/import policy的映射类
         final PolicyDatabase policyDatabase = new PolicyDatabase(this.localAs.getValue(), localBgpId, cId);
+        // 实例化import policy tracker impl
         this.importPolicyPeerTracker = new ImportPolicyPeerTrackerImpl(policyDatabase);
+
         this.serviceGroupIdentifier = ServiceGroupIdentifier.create(this.ribId.getValue() + "-service-group");
         Preconditions.checkNotNull(provider, "ClusterSingletonServiceProvider is null");
         this.provider = provider;
         this.configurationWriter = configurationWriter;
 
+        // build export policy tacker
         final ImmutableMap.Builder<TablesKey, ExportPolicyPeerTracker> exportPolicies = new ImmutableMap.Builder<>();
         for (final BgpTableType t : this.localTables) {
             final TablesKey key = new TablesKey(t.getAfi(), t.getSafi());
@@ -158,6 +170,7 @@ public final class RIBImpl extends BGPRIBStateImpl implements ClusterSingletonSe
         this.renderStats = new RIBImplRuntimeMXBeanImpl(localBgpId, ribId, localAs, cId, this, this.localTablesKeys);
         LOG.info("RIB Singleton Service {} registered, RIB {}", getIdentifier().getValue(), this.ribId.getValue());
         //this need to be always the last step
+        // 注册自身服务，后面instantiateServiceInstance会被调用
         this.registration = registerClusterSingletonService(this);
     }
 
@@ -188,6 +201,7 @@ public final class RIBImpl extends BGPRIBStateImpl implements ClusterSingletonSe
             } catch (final TransactionCommitFailedException e1) {
                 LOG.error("Failed to initiate LocRIB for key {}", key, e1);
             }
+            // 穿甲locRibWriter
             createLocRibWriter(key);
         } else {
             LOG.warn("There's no registered RIB Context for {}", key.getAfi());
@@ -199,6 +213,7 @@ public final class RIBImpl extends BGPRIBStateImpl implements ClusterSingletonSe
         final DOMTransactionChain txChain = createPeerChain(this);
         PathSelectionMode pathSelectionStrategy = this.bestPathSelectionStrategies.get(key);
         if (pathSelectionStrategy == null) {
+            // 路径选择策略
             pathSelectionStrategy = BasePathSelectionModeFactory.createBestPathSelectionStrategy();
         }
 
@@ -318,6 +333,7 @@ public final class RIBImpl extends BGPRIBStateImpl implements ClusterSingletonSe
         return this.exportPolicyPeerTrackerMap.get(tablesKey);
     }
 
+    // 实例化逻辑
     @Override
     public synchronized void instantiateServiceInstance() {
         this.isServiceInstantiated = true;
@@ -328,9 +344,11 @@ public final class RIBImpl extends BGPRIBStateImpl implements ClusterSingletonSe
         LOG.info("RIB Singleton Service {} instantiated, RIB {}", getIdentifier().getValue(), this.ribId.getValue());
         LOG.debug("Instantiating RIB table {} at {}", this.ribId , this.yangRibId);
 
+        // 创建bgp-rib yang
         final ContainerNode bgpRib = Builders.containerBuilder().withNodeIdentifier(new NodeIdentifier(BgpRib.QNAME))
             .addChild(ImmutableNodes.mapNodeBuilder(Rib.QNAME).build()).build();
 
+        // riib
         final MapEntryNode ribInstance = Builders.mapEntryBuilder().withNodeIdentifier(
             new NodeIdentifierWithPredicates(Rib.QNAME, RIB_ID_QNAME, this.ribId .getValue()))
             .addChild(ImmutableNodes.leafNode(RIB_ID_QNAME, this.ribId .getValue()))
@@ -342,6 +360,8 @@ public final class RIBImpl extends BGPRIBStateImpl implements ClusterSingletonSe
 
         final DOMDataWriteTransaction trans = this.domChain.newWriteOnlyTransaction();
 
+        //YANG结构：
+        //   顶层bgp-rib -> rib
         // merge empty BgpRib + Rib, to make sure the top-level parent structure is present
         trans.merge(LogicalDatastoreType.OPERATIONAL, YangInstanceIdentifier.builder().node(BgpRib.QNAME).build(), bgpRib);
         trans.put(LogicalDatastoreType.OPERATIONAL, this.yangRibId, ribInstance);
@@ -354,6 +374,7 @@ public final class RIBImpl extends BGPRIBStateImpl implements ClusterSingletonSe
 
         LOG.debug("Effective RIB created.");
 
+        // 创建所有address family的 loc rib
         this.localTablesKeys.forEach(this::startLocRib);
     }
 

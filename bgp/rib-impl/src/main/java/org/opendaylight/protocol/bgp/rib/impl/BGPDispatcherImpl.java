@@ -100,6 +100,7 @@ public class BGPDispatcherImpl implements BGPDispatcher, AutoCloseable {
         return createClient(remoteAddress, retryTimer, clientBootStrap);
     }
 
+    // 创建底层bootstrap对象
     private synchronized Bootstrap createClientBootStrap(final KeyMapping keys, final boolean reuseAddress) {
         final Bootstrap bootstrap = new Bootstrap();
         if (Epoll.isAvailable()) {
@@ -108,6 +109,7 @@ public class BGPDispatcherImpl implements BGPDispatcher, AutoCloseable {
         } else {
             bootstrap.channel(NioSocketChannel.class);
         }
+        // keys包含neighbor相关信息 md5
         if (keys != null && !keys.isEmpty()) {
             if (Epoll.isAvailable()) {
                 bootstrap.option(EpollChannelOption.TCP_MD5SIG, keys);
@@ -138,6 +140,7 @@ public class BGPDispatcherImpl implements BGPDispatcher, AutoCloseable {
         }
     }
 
+    // BgpPeer instantiateServiceInstance()调用此方法
     @Override
     public synchronized Future<Void> createReconnectingClient(final InetSocketAddress remoteAddress,
             final int retryTimer, final KeyMapping keys) {
@@ -148,12 +151,42 @@ public class BGPDispatcherImpl implements BGPDispatcher, AutoCloseable {
     protected synchronized Future<Void> createReconnectingClient(final InetSocketAddress remoteAddress,
         final int retryTimer, final KeyMapping keys, final InetSocketAddress localAddress,
         final boolean reuseAddress) {
+        /*
+            实例化BGPClientSessionNegotiatorFactory
+            注意此时this.bgpPeerRegistry 已经在BgpPeer的instantiateServiceInstance时，将BGPPeer注册了（调用此步骤前完成了）
+        */
         final BGPClientSessionNegotiatorFactory snf = new BGPClientSessionNegotiatorFactory(this.bgpPeerRegistry);
+
+        // reuseAddress => false，keys对象包含neighbor相关md5信息
+        // 效果：创建底层netty bootstrap对象
         final Bootstrap bootstrap = createClientBootStrap(keys, reuseAddress);
         bootstrap.localAddress(localAddress);
+
+        /*
+            重点：BGPChannel.createChannelPipelineInitializer(this.handlerFactory, snf)
+                - BGPChannel是内部类
+                - this.handlerFactory 是BGPHandlerFactory(messageRegistry)
+                - snf 是BGPClientSessionNegotiatorFactory(this.bgpPeerRegistry)
+                - 效果之一：有映射 NEGOTIATOR =》new BGPClientSessionNegotiator(promise, channel, this.peerRegistry);
+
+                    - 实例化 BGPClientSessionNegotiator，最终会实例化 AbstractBGPSessionNegotiator
+                    - AbstractBGPSessionNegotiator有方法：
+                        1.channelRead()，读取底层channel，再处理消息handleMessage
+                        2.在handleMessage中会定义了BGP的状态机，不同状态对应处理不同：
+                            IDLE：
+                                调用startNegotiation()开始协商，通过registry获取到对端地址等
+                            OPEN_SENT
+                            OPEN_CONFIRM
+                            FINISH
+                        3.最终BGP协商建立成功，会实例化BGPSessionImpl
+
+         */
         final BGPReconnectPromise<?> reconnectPromise = new BGPReconnectPromise<>(GlobalEventExecutor.INSTANCE,
             remoteAddress, retryTimer, bootstrap, this.bgpPeerRegistry,
             BGPChannel.createChannelPipelineInitializer(this.handlerFactory, snf));
+        /*
+
+         */
         reconnectPromise.connect();
         return reconnectPromise;
     }
@@ -208,6 +241,7 @@ public class BGPDispatcherImpl implements BGPDispatcher, AutoCloseable {
         createChannelPipelineInitializer(final BGPHandlerFactory hf, final T snf) {
             return (channel, promise) -> {
                 channel.pipeline().addLast(hf.getDecoders());
+                // snf.getSessionNegotiator返回的是：new BGPClientSessionNegotiator(promise, channel, this.peerRegistry);
                 channel.pipeline().addLast(NEGOTIATOR, snf.getSessionNegotiator(channel, promise));
                 channel.pipeline().addLast(hf.getEncoders());
             };

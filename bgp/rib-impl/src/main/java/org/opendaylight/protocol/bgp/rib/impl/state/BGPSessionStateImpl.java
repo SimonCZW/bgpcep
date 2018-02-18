@@ -179,6 +179,7 @@ public final class BGPSessionStateImpl implements BGPSessionState, BGPTimersStat
         return this.sessionStopwatch.elapsed(TimeUnit.MILLISECONDS);
     }
 
+    // 会被BGPPeer调用，注册为自己(bgpMessagesListener即是BGPPeer)
     public synchronized void registerMessagesCounter(final BGPMessagesListener bgpMessagesListener) {
         this.messagesListenerCounter= bgpMessagesListener;
     }

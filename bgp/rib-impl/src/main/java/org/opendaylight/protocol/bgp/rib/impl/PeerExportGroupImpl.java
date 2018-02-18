@@ -28,6 +28,7 @@ final class PeerExportGroupImpl implements PeerExportGroupRegistry {
         this.policy = Preconditions.checkNotNull(policy);
     }
 
+    // 根据export规则, 过滤effectiveAttributes
     @Override
     public ContainerNode effectiveAttributes(final PeerRole role, final ContainerNode attributes) {
         return attributes == null || role == null ? null : this.policy.effectiveAttributes(role, attributes);

@@ -25,17 +25,22 @@ final class BasePathSelector extends AbstractBestPathSelector {
         super(ourAs);
     }
 
+    // 处理路由
     void processPath(final UnsignedInteger routerId, final ContainerNode attrs) {
         Preconditions.checkNotNull(routerId, "Router ID may not be null");
 
         // Consider only non-null attributes
         if (attrs != null) {
+            // 如果有Originator IDs 替换Router ID
             final UnsignedInteger originatorId = replaceOriginator(routerId, attrs);
             /*
              * Store the new details if we have nothing stored or when the selection algorithm indicates new details
              * are better.
              */
+            // 解析路由的属性attribute
             final BestPathState state = new BestPathStateImpl(attrs);
+
+            // 十三条选路规则
             if (this.bestOriginatorId == null || !isExistingPathBetter(state)) {
                 LOG.trace("Selecting path from router {}", routerId);
                 this.bestOriginatorId = originatorId;
@@ -45,7 +50,7 @@ final class BasePathSelector extends AbstractBestPathSelector {
         }
     }
 
-
+    // 构造最优的bestPath返回
     BaseBestPath result() {
         return this.bestRouterId == null ? null : new BaseBestPath(this.bestRouterId, this.bestState);
     }

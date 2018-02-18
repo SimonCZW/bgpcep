@@ -37,10 +37,12 @@ import org.opendaylight.controller.md.sal.common.api.data.LogicalDatastoreType;
 import org.opendaylight.protocol.bgp.openconfig.spi.BGPTableTypeRegistryConsumer;
 import org.opendaylight.protocol.bgp.rib.impl.spi.BgpDeployer;
 import org.opendaylight.protocol.bgp.rib.impl.spi.InstanceType;
+// openconfig-api -> openconfig-bgp.yang
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.bgp.rev151009.bgp.neighbors.Neighbor;
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.bgp.rev151009.bgp.top.Bgp;
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.bgp.rev151009.bgp.top.bgp.Global;
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.bgp.rev151009.bgp.top.bgp.Neighbors;
+// openconfig-api -> openconfig-network-instance.yang
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.network.instance.rev151018.network.instance.top.NetworkInstances;
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.network.instance.rev151018.network.instance.top.network.instances.NetworkInstance;
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.network.instance.rev151018.network.instance.top.network.instances.NetworkInstanceBuilder;
@@ -48,10 +50,13 @@ import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.network.instance.re
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.network.instance.rev151018.network.instance.top.network.instances.network.instance.Protocols;
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.network.instance.rev151018.network.instance.top.network.instances.network.instance.ProtocolsBuilder;
 import org.opendaylight.yang.gen.v1.http.openconfig.net.yang.network.instance.rev151018.network.instance.top.network.instances.network.instance.protocols.Protocol;
+// openconfig-api -> bgp-openconfig-extensions.yang
+// Protocol1 where from? =>yang-version "1" ?
 import org.opendaylight.yang.gen.v1.urn.opendaylight.params.xml.ns.yang.bgp.openconfig.extensions.rev160614.Protocol1;
 import org.opendaylight.yangtools.concepts.ListenerRegistration;
 import org.opendaylight.yangtools.yang.binding.DataObject;
 import org.opendaylight.yangtools.yang.binding.InstanceIdentifier;
+// 怎么用
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceRegistration;
 import org.osgi.service.blueprint.container.BlueprintContainer;
@@ -111,8 +116,10 @@ public final class BgpDeployerImpl implements BgpDeployer, ClusteredDataTreeChan
             LOG.trace("BGP configuration has changed: {}", rootNode);
             for (final DataObjectModification<? extends DataObject> dataObjectModification : rootNode.getModifiedChildren()) {
                 if (dataObjectModification.getDataType().equals(Global.class)) {
+                    // 监听bgp instance YANG
                     onGlobalChanged((DataObjectModification<Global>) dataObjectModification, rootIdentifier);
                 } else if (dataObjectModification.getDataType().equals(Neighbors.class)) {
+                    // 监听neighbor YANG
                     onNeighborsChanged((DataObjectModification<Neighbors>) dataObjectModification, rootIdentifier);
                 }
             }
@@ -162,6 +169,7 @@ public final class BgpDeployerImpl implements BgpDeployer, ClusteredDataTreeChan
         return wTx.submit();
     }
 
+    // BGP instance树变化
     private synchronized void onGlobalChanged(final DataObjectModification<Global> dataObjectModification,
         final InstanceIdentifier<Bgp> rootIdentifier) {
         switch (dataObjectModification.getModificationType()) {
@@ -177,17 +185,22 @@ public final class BgpDeployerImpl implements BgpDeployer, ClusteredDataTreeChan
         }
     }
 
+    // BGP instance YANG变化
     @Override
     public synchronized void onGlobalModified(final InstanceIdentifier<Bgp> rootIdentifier, final Global global,
         final WriteConfiguration configurationWriter) {
+        // 查询是否已经有该instances, 不同instance global下的name不同?
         final RibImpl ribImpl = this.ribs.get(rootIdentifier);
         if(ribImpl == null ) {
+            // 创建
             onGlobalCreated(rootIdentifier, global, configurationWriter);
         } else if (!ribImpl.isGlobalEqual(global)) {
+            // 修改
             onGlobalUpdated(rootIdentifier, global, ribImpl, configurationWriter);
         }
     }
 
+    // 断掉rib instance所有邻居?
     private synchronized List<PeerBean> closeAllBindedPeers(final InstanceIdentifier<Bgp> rootIdentifier) {
         final List<PeerBean> filtered = new ArrayList<>();
         this.peers.entrySet().stream().filter(entry -> entry.getKey().firstIdentifierOf(Bgp.class)
@@ -204,15 +217,20 @@ public final class BgpDeployerImpl implements BgpDeployer, ClusteredDataTreeChan
         return filtered;
     }
 
+    // 创建bgp rib
     private synchronized void onGlobalCreated(final InstanceIdentifier<Bgp> rootIdentifier, final Global global,
         final WriteConfiguration configurationWriter) {
         LOG.debug("Creating RIB instance with configuration: {}", global);
+        // 初始化rib instance
+        // Bean 获取实例
         final RibImpl ribImpl = (RibImpl) this.container.getComponentInstance(InstanceType.RIB.getBeanName());
         initiateRibInstance(rootIdentifier, global, ribImpl, configurationWriter);
+        // 写入hash记录
         this.ribs.put(rootIdentifier, ribImpl);
         LOG.debug("RIB instance created: {}", ribImpl);
     }
 
+    // 修改bgp rib => 关闭旧的，重新init新的rib instance
     private synchronized void onGlobalUpdated(final InstanceIdentifier<Bgp> rootIdentifier, final Global global,
         final RibImpl ribImpl, final WriteConfiguration configurationWriter) {
         LOG.debug("Modifying RIB instance with configuration: {}", global);
@@ -228,6 +246,7 @@ public final class BgpDeployerImpl implements BgpDeployer, ClusteredDataTreeChan
         LOG.debug("RIB instance created: {}", ribImpl);
     }
 
+    // 删除bgp rib
     @Override
     public synchronized void onGlobalRemoved(final InstanceIdentifier<Bgp> rootIdentifier) {
         LOG.debug("Removing RIB instance: {}", rootIdentifier);
@@ -240,6 +259,7 @@ public final class BgpDeployerImpl implements BgpDeployer, ClusteredDataTreeChan
         }
     }
 
+    // 注册服务
     private synchronized void registerRibInstance(final RibImpl ribImpl, final String ribInstanceName) {
         final Dictionary<String, String> properties = new Hashtable<>();
         properties.put(InstanceType.RIB.getBeanName(), ribInstanceName);
@@ -248,13 +268,22 @@ public final class BgpDeployerImpl implements BgpDeployer, ClusteredDataTreeChan
         ribImpl.setServiceRegistration(serviceRegistration);
     }
 
+    // 初始化rib instance方法
     private synchronized void initiateRibInstance(final InstanceIdentifier<Bgp> rootIdentifier, final Global global,
         final RibImpl ribImpl, final WriteConfiguration configurationWriter) {
+        // rootIdentifier.firstKeyOf(Protocol.class).getName();
+        // 应该是global-bgp
         final String ribInstanceName = getRibInstanceName(rootIdentifier);
+
+        // ribImpl逻辑入口
         ribImpl.start(global, ribInstanceName, this.tableTypeRegistry, configurationWriter);
+
+        // 注册服务到ribImpl : setServiceRegistration
         registerRibInstance(ribImpl, ribInstanceName);
     }
 
+    /////////////////////////////////////////////
+    // 邻居变化
     private synchronized void onNeighborsChanged(final DataObjectModification<Neighbors> dataObjectModification,
         final InstanceIdentifier<Bgp> rootIdentifier) {
         for (final DataObjectModification<? extends DataObject> neighborModification : dataObjectModification.getModifiedChildren()) {
@@ -272,6 +301,7 @@ public final class BgpDeployerImpl implements BgpDeployer, ClusteredDataTreeChan
         }
     }
 
+    // 邻居树变化
     @Override
     public synchronized void onNeighborModified(final InstanceIdentifier<Bgp> rootIdentifier, final Neighbor neighbor,
         final WriteConfiguration configurationWriter) {
@@ -284,30 +314,38 @@ public final class BgpDeployerImpl implements BgpDeployer, ClusteredDataTreeChan
         }
     }
 
+    // 新邻居创建
     private synchronized void onNeighborCreated(final InstanceIdentifier<Bgp> rootIdentifier, final Neighbor neighbor,
         final WriteConfiguration configurationWriter) {
         LOG.debug("Creating Peer instance with configuration: {}", neighbor);
         final PeerBean bgpPeer;
         if (OpenConfigMappingUtil.isApplicationPeer(neighbor)) {
+            // 判断是否是applications_peer
             bgpPeer = (PeerBean) this.container.getComponentInstance(InstanceType.APP_PEER.getBeanName());
         } else {
             bgpPeer = (PeerBean) this.container.getComponentInstance(InstanceType.PEER.getBeanName());
         }
         final InstanceIdentifier<Neighbor> neighborInstanceIdentifier = getNeighborInstanceIdentifier(rootIdentifier, neighbor.getKey());
+        // init
         initiatePeerInstance(rootIdentifier, neighborInstanceIdentifier, neighbor, bgpPeer, configurationWriter);
         this.peers.put(neighborInstanceIdentifier, bgpPeer);
         LOG.debug("Peer instance created {}", bgpPeer);
     }
 
+    // 邻居树变化
+    // 干掉邻居，重洗初始化连接?
     private synchronized void onNeighborUpdated(final PeerBean bgpPeer, final InstanceIdentifier<Bgp> rootIdentifier, final Neighbor neighbor,
             final WriteConfiguration configurationWriter) {
         LOG.debug("Updating Peer instance with configuration: {}", neighbor);
+        // do what ?
         bgpPeer.close();
         final InstanceIdentifier<Neighbor> neighborInstanceIdentifier = getNeighborInstanceIdentifier(rootIdentifier, neighbor.getKey());
+        // 初始化
         initiatePeerInstance(rootIdentifier, neighborInstanceIdentifier, neighbor, bgpPeer, configurationWriter);
         LOG.debug("Peer instance updated {}", bgpPeer);
     }
 
+    // 直接干掉邻居
     @Override
     public synchronized void onNeighborRemoved(final InstanceIdentifier<Bgp> rootIdentifier, final Neighbor neighbor) {
         LOG.debug("Removing Peer instance: {}", rootIdentifier);
@@ -318,6 +356,7 @@ public final class BgpDeployerImpl implements BgpDeployer, ClusteredDataTreeChan
         }
     }
 
+    // 注册普通邻居peer
     private synchronized void registerPeerInstance(final BgpPeer bgpPeer, final String peerInstanceName) {
         final Dictionary<String, String> properties = new Hashtable<>();
         properties.put(InstanceType.PEER.getBeanName(), peerInstanceName);
@@ -326,6 +365,7 @@ public final class BgpDeployerImpl implements BgpDeployer, ClusteredDataTreeChan
         bgpPeer.setServiceRegistration(serviceRegistration);
     }
 
+    // 注册application-peers
     private synchronized void registerAppPeerInstance(final AppPeer appPeer, final String peerInstanceName) {
         final Dictionary<String, String> properties = new Hashtable<>();
         properties.put(InstanceType.PEER.getBeanName(), peerInstanceName);
@@ -334,13 +374,18 @@ public final class BgpDeployerImpl implements BgpDeployer, ClusteredDataTreeChan
         appPeer.setServiceRegistration(serviceRegistration);
     }
 
+    // 初始化邻居
+    // BgpPeer / AppPeer两个类
     private synchronized void initiatePeerInstance(final InstanceIdentifier<Bgp> rootIdentifier,
         final InstanceIdentifier<Neighbor> neighborIdentifier, final Neighbor neighbor,
         final PeerBean bgpPeer, final WriteConfiguration configurationWriter) {
         final String peerInstanceName = getNeighborInstanceName(neighborIdentifier);
+        // 在global创建时创建的rib
         final RibImpl rib = this.ribs.get(rootIdentifier);
         if (rib != null) {
+            // 建立连接等各个逻辑处理入口
             bgpPeer.start(rib, neighbor, this.tableTypeRegistry, configurationWriter);
+
             if (bgpPeer instanceof BgpPeer) {
                 registerPeerInstance((BgpPeer) bgpPeer, peerInstanceName);
             } else if(bgpPeer instanceof AppPeer) {

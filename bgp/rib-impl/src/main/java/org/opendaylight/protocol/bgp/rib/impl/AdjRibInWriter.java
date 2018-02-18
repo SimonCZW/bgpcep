@@ -129,6 +129,7 @@ final class AdjRibInWriter {
      * @param addPathTablesType
      * @return New writer
      */
+    // 在BGPPeer SessionUp时被调用
     AdjRibInWriter transform(final PeerId newPeerId, final RIBSupportContextRegistry registry,
         final Set<TablesKey> tableTypes, final Map<TablesKey, SendReceive> addPathTablesType) {
         return transform(newPeerId, registry, tableTypes, addPathTablesType, null);
@@ -140,6 +141,7 @@ final class AdjRibInWriter {
 
         final YangInstanceIdentifier newPeerPath;
         newPeerPath = createEmptyPeerStructure(newPeerId, tx);
+        // 创建table
         final ImmutableMap<TablesKey, TableContext> tb = createNewTableInstances(newPeerPath, registry, tableTypes,
             addPathTablesType, tx);
 
@@ -187,7 +189,9 @@ final class AdjRibInWriter {
                 LOG.warn("No support for table type {}, skipping it", tableKey);
                 continue;
             }
+            // 创建adj-rib-out
             installAdjRibsOutTables(newPeerPath, rs, instanceIdentifierKey, tableKey, addPathTablesType.get(tableKey), tx);
+            // 创建adj-rib-in
             installAdjRibInTables(newPeerPath, tableKey, rs, instanceIdentifierKey, tx, tb);
         }
         return tb.build();

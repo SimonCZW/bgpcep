@@ -105,16 +105,20 @@ abstract class AbstractBGPSessionNegotiator extends ChannelInboundHandlerAdapter
                 return;
             }
 
+            // 通过之前注册的registry获取neighbor地址
             final BGPSessionPreferences preferences = this.registry.getPeerPreferences(remoteIp);
 
+            // 通过配置获取as
             int as = preferences.getMyAs().getValue().intValue();
             // Set as AS_TRANS if the value is bigger than 2B
             if (as > Values.UNSIGNED_SHORT_MAX_VALUE) {
                 as = AS_TRANS;
             }
+            // 发送open消息
             sendMessage(new OpenBuilder().setMyAsNumber(as).setHoldTimer(preferences.getHoldTime()).setBgpIdentifier(
                 preferences.getBgpId()).setBgpParameters(preferences.getParams()).build());
             if (this.state != State.FINISHED) {
+                // 设置OPEN_SENT状态
                 this.state = State.OPEN_SENT;
                 this.pending = this.channel.eventLoop().schedule(() -> {
                     synchronized (AbstractBGPSessionNegotiator.this) {
@@ -142,6 +146,7 @@ abstract class AbstractBGPSessionNegotiator extends ChannelInboundHandlerAdapter
         return remoteIp;
     }
 
+    // read channel后处理消息
     protected synchronized void handleMessage(final Notification msg) {
         LOG.debug("Channel {} handling message in state {}, msg: {}", this.channel, this.state, msg);
         switch (this.state) {
@@ -151,7 +156,9 @@ abstract class AbstractBGPSessionNegotiator extends ChannelInboundHandlerAdapter
         case IDLE:
             // to avoid race condition when Open message was sent by the peer before startNegotiation could be executed
             if (msg instanceof Open) {
+                // 开始协商，发送open消息, 设置OPEN_SENT状态
                 startNegotiation();
+                // 发送keepalive消息，修改状态为OPEN_CONFIRE，实例化BGPSessionImpl！！！
                 handleOpen((Open) msg);
                 return;
             }
@@ -159,16 +166,19 @@ abstract class AbstractBGPSessionNegotiator extends ChannelInboundHandlerAdapter
             break;
         case OPEN_CONFIRM:
             if (msg instanceof Keepalive) {
+                // 收到keepalive消息，协商建立成功
                 negotiationSuccessful(this.session);
                 LOG.info("BGP Session with peer {} established successfully.", this.channel);
             } else if (msg instanceof Notify) {
                 final Notify ntf = (Notify) msg;
                 negotiationFailed(new BGPDocumentedException("Peer refusal", BGPError.forValue(ntf.getErrorCode(), ntf.getErrorSubcode())));
             }
+            // 协商成功，设置状态为FINISHED
             this.state = State.FINISHED;
             return;
         case OPEN_SENT:
             if (msg instanceof Open) {
+                // 发送keepalive消息，修改状态为OPEN_CONFIRE，实例化BGPSessionImpl！！！
                 handleOpen((Open) msg);
                 return;
             }
@@ -196,6 +206,7 @@ abstract class AbstractBGPSessionNegotiator extends ChannelInboundHandlerAdapter
         return builder.build();
     }
 
+    // 发送keepalive消息，修改状态为OPEN_CONFIRE，实例化BGPSessionImpl！！！
     private synchronized void handleOpen(final Open openObj) {
         final IpAddress remoteIp = getRemoteIp();
         final BGPSessionPreferences preferences = this.registry.getPeerPreferences(remoteIp);

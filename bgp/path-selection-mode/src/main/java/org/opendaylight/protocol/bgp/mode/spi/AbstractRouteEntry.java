@@ -89,6 +89,7 @@ public abstract class AbstractRouteEntry implements RouteEntry {
             .node(ROUTES_IDENTIFIER), routeId);
     }
 
+    // 轮询所有peerRole，获取peerGroup, 如果group包含传入routePeerId则return,若无return null
     protected PeerRole getRoutePeerIdRole(final ExportPolicyPeerTracker peerPT, final PeerId routePeerId) {
         for (final PeerRole role : PeerRole.values()) {
             final PeerExportGroup peerGroup = peerPT.getPeerGroup(role);

@@ -76,10 +76,12 @@ final class AdjRibOutListener implements ClusteredDOMDataTreeChangeListener, Pre
         this.codecs = registry.getCodecs(this.support);
         this.mpSupport = mpSupport;
         final YangInstanceIdentifier adjRibOutId =  ribId.node(Peer.QNAME).node(IdentifierUtils.domPeerId(peerId)).node(AdjRibOut.QNAME).node(Tables.QNAME).node(RibSupportUtils.toYangTablesKey(tablesKey));
+        // 注册监听adj-rib-out listener
         this.registerDataTreeChangeListener = service.registerDataTreeChangeListener(new DOMDataTreeIdentifier(LogicalDatastoreType.OPERATIONAL, adjRibOutId), this);
         this.routeCounter = routeCounter;
     }
 
+    // 调用入口
     static AdjRibOutListener create(@Nonnull final PeerId peerId, @Nonnull final TablesKey tablesKey, @Nonnull final YangInstanceIdentifier ribId,
         @Nonnull final CodecsRegistry registry, @Nonnull final RIBSupport support, @Nonnull final DOMDataTreeChangeService service,
         @Nonnull final ChannelOutputLimiter session, final boolean mpSupport, @Nonnull final LongAdder routeCounter
@@ -87,12 +89,14 @@ final class AdjRibOutListener implements ClusteredDOMDataTreeChangeListener, Pre
         return new AdjRibOutListener(peerId, tablesKey, ribId, registry, support, service, session, mpSupport, routeCounter);
     }
 
+    // 监听adj-rib-out YANG变化
     @Override
     public void onDataTreeChanged(final Collection<DataTreeCandidate> changes) {
         LOG.debug("Data change received for AdjRibOut {}", changes);
         for (final DataTreeCandidate tc : changes) {
             LOG.trace("Change {} type {}", tc.getRootNode(), tc.getRootNode().getModificationType());
             for (final DataTreeCandidateNode child : tc.getRootNode().getChildNodes()) {
+                // 处理变化路由
                 processSupportedFamilyRoutes(child);
             }
         }
@@ -105,6 +109,7 @@ final class AdjRibOutListener implements ClusteredDOMDataTreeChangeListener, Pre
         }
     }
 
+    // 根据路由新增/删除，build update消息发送
     private void processRouteChange(final DataTreeCandidateNode route) {
         final Update update;
         switch (route.getModificationType()) {
@@ -127,6 +132,7 @@ final class AdjRibOutListener implements ClusteredDOMDataTreeChangeListener, Pre
             LOG.warn("Ignoring unhandled modification type {}", route.getModificationType());
             return;
         }
+        // BGPSession flush到channel发消息
         this.session.write(update);
     }
 
@@ -138,6 +144,7 @@ final class AdjRibOutListener implements ClusteredDOMDataTreeChangeListener, Pre
         return this.codecs.deserializeAttributes(advertisedAttrs);
     }
 
+    // 删除路由告知peer
     private Update withdraw(final MapEntryNode route) {
         this.routeCounter.decrement();
         if (!this.mpSupport) {
@@ -146,6 +153,7 @@ final class AdjRibOutListener implements ClusteredDOMDataTreeChangeListener, Pre
         return this.support.buildUpdate(Collections.emptyList(), Collections.singleton(route), routeAttributes(route));
     }
 
+    // 通告路由到peer
     private Update advertise(final MapEntryNode route) {
         this.routeCounter.increment();
         this.prefixesSentCounter.increment();
@@ -155,6 +163,7 @@ final class AdjRibOutListener implements ClusteredDOMDataTreeChangeListener, Pre
         return this.support.buildUpdate(Collections.singleton(route), Collections.emptyList(), routeAttributes(route));
     }
 
+    //build update消息
     private Update buildUpdate(@Nonnull final Collection<MapEntryNode> advertised, @Nonnull final Collection<MapEntryNode> withdrawn, @Nonnull final Attributes attr) {
         final UpdateBuilder ub = new UpdateBuilder()
             .setWithdrawnRoutes(new WithdrawnRoutesBuilder().setWithdrawnRoutes(extractPrefixes(withdrawn)).build())

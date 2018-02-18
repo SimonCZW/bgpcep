@@ -98,6 +98,7 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
             this.prefixesInstalled = buildPrefixesTables(tables);
             this.prefixesReceived = buildPrefixesTables(tables);
 
+            // 监听adj-rib-in yang变化
             final DOMDataTreeIdentifier treeId = new DOMDataTreeIdentifier(LogicalDatastoreType.OPERATIONAL,
                 this.peerIId.node(AdjRibIn.QNAME).node(Tables.QNAME));
             LOG.debug("Registered Effective RIB on {}", this.peerIId);
@@ -140,6 +141,7 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
             counter.setValueToCounterOrSetDefault(tablesKey, size);
         }
 
+        // 处理单条改变路由
         private void processRoute(final DOMDataWriteTransaction tx, final RIBSupport ribSupport, final AbstractImportPolicy policy,
             final YangInstanceIdentifier routesPath, final DataTreeCandidateNode route) {
             LOG.debug("Process route {}", route.getIdentifier());
@@ -159,7 +161,7 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
                 break;
             case APPEARED:
             case SUBTREE_MODIFIED:
-            case WRITE:
+            case WRITE: //adj-rib-in写入了路由
                 tx.put(LogicalDatastoreType.OPERATIONAL, routeId, route.getDataAfter().get());
                 CountersUtil.increment(this.prefixesReceived.get(tablesKey), tablesKey);
                 // count adj-rib-in route first
@@ -169,6 +171,7 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
                 final ContainerNode effectiveAttrs;
 
                 if (advertisedAttrs != null) {
+                    // policy是先去构造effective-rib-in 构造器中赋值的 importPolicy类（不同peerRole不同，具体看PolicyDatabase.java）
                     effectiveAttrs = policy.effectiveAttributes(advertisedAttrs);
                 } else {
                     effectiveAttrs = null;
@@ -176,12 +179,15 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
 
                 LOG.debug("Route {} effective attributes {} towards {}", route.getIdentifier(), effectiveAttrs, routeId);
 
+                // effectiveAttrs不为null，通过了import policy过滤
                 if (effectiveAttrs != null) {
+                    // 通过，写入路由
                     tx.put(LogicalDatastoreType.OPERATIONAL, routeId.node(ribSupport.routeAttributesIdentifier()), effectiveAttrs);
                     if(route.getModificationType() == ModificationType.WRITE) {
                         CountersUtil.increment(this.prefixesInstalled.get(tablesKey), tablesKey);
                     }
                 } else {
+                    // 没通过过滤，删除路由
                     LOG.warn("Route {} advertised empty attributes", routeId);
                     tx.delete(LogicalDatastoreType.OPERATIONAL,  routeId);
                 }
@@ -192,6 +198,7 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
             }
         }
 
+        // 处理table子树改变入口
         private void processTableChildren(final DOMDataWriteTransaction tx, final RIBSupport ribSupport, final YangInstanceIdentifier tablePath, final Collection<DataTreeCandidateNode> children) {
             for (final DataTreeCandidateNode child : children) {
                 final PathArgument childIdentifier = child.getIdentifier();
@@ -217,6 +224,7 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
                     break;
                 case APPEARED:
                 case WRITE:
+                    // 写路由
                     writeRouteTables(child, childIdentifier,tx, ribSupport, EffectiveRibInWriter.this.importPolicy, childPath, childDataAfter);
 
                     break;
@@ -238,6 +246,7 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
             }
         }
 
+        // 轮询所有写入的路由,调用处理
         private void writeRouteTables(final DataTreeCandidateNode child, final PathArgument childIdentifier, final DOMDataWriteTransaction tx, final RIBSupport ribSupport, final AbstractImportPolicy policy, final YangInstanceIdentifier childPath, final Optional<NormalizedNode<?, ?>> childDataAfter) {
             if (TABLE_ROUTES.equals(childIdentifier)) {
                 final Collection<DataTreeCandidateNode> changedRoutes = ribSupport.changedRoutes(child);
@@ -267,6 +276,7 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
             processTableChildren(tx, ribSupport.getRibSupport(), tablePath, table.getChildNodes());
         }
 
+        // 写table
         private void writeTable(final DOMDataWriteTransaction tx, final NodeIdentifierWithPredicates tableKey, final DataTreeCandidateNode table) {
             final RIBSupportContext ribSupport = getRibSupport(tableKey);
             final YangInstanceIdentifier tablePath = effectiveTablePath(tableKey);
@@ -278,6 +288,8 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
             processTableChildren(tx, ribSupport.getRibSupport(), tablePath, table.getChildNodes());
         }
 
+
+        // adj-rib-in tables YANG变化
         @Override
         public void onDataTreeChanged(@Nonnull final Collection<DataTreeCandidate> changes) {
             LOG.trace("Data changed called to effective RIB. Change : {}", changes);
@@ -285,10 +297,12 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
             // we have a lot of transactions created for 'nothing' because a lot of changes
             // are skipped, so ensure we only create one transaction when we really need it
             DOMDataWriteTransaction tx = null;
+            // adj-rib-in -> list tables
             for (final DataTreeCandidate tc : changes) {
                 final YangInstanceIdentifier rootPath = tc.getRootPath();
 
                 final DataTreeCandidateNode root = tc.getRootNode();
+                // 轮询list tables下的每个table
                 for (final DataTreeCandidateNode table : root.getChildNodes()) {
                     if (tx == null) {
                         tx = this.chain.newWriteOnlyTransaction();
@@ -301,6 +315,7 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
             }
         }
 
+        // adj-rib-in table变化调用
         private void changeDataTree(final DOMDataWriteTransaction tx, final YangInstanceIdentifier rootPath,
                 final DataTreeCandidateNode root, final DataTreeCandidateNode table) {
             final PathArgument lastArg = table.getIdentifier();
@@ -315,6 +330,7 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
                 LOG.debug("Delete Effective Table {} modification type {}, ", effectiveTablePath, modificationType);
 
                 // delete the corresponding effective table
+                // 直接删除
                 tx.delete(LogicalDatastoreType.OPERATIONAL, effectiveTablePath);
                 final TablesKey tk = new TablesKey(ribSupport.getAfi(), ribSupport.getSafi());
                 deleteRoute(this.adjRibInRouteCounters, this.adjRibInRouteMap, tk);
@@ -328,6 +344,7 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
                 break;
             case APPEARED:
             case WRITE:
+                // 写路由调用
                 writeTable(tx, tableKey, table);
                 break;
             default:
@@ -376,10 +393,12 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
             return this.prefixesInstalled.values().stream().mapToLong(LongAdder::longValue).sum();
         }
     }
+    // AdjInTracker end.
 
     private final AdjInTracker adjInTracker;
     private final AbstractImportPolicy importPolicy;
 
+    // 入口
     static EffectiveRibInWriter create(@Nonnull final DOMDataTreeChangeService service, @Nonnull final DOMTransactionChain chain,
         @Nonnull final YangInstanceIdentifier peerIId, @Nonnull final ImportPolicyPeerTracker importPolicyPeerTracker,
         @Nonnull final RIBSupportContextRegistry registry, final PeerRole peerRole,
@@ -391,8 +410,12 @@ final class EffectiveRibInWriter implements PrefixesReceivedCounters, PrefixesIn
     private EffectiveRibInWriter(final DOMDataTreeChangeService service, final DOMTransactionChain chain, final YangInstanceIdentifier peerIId,
         final ImportPolicyPeerTracker importPolicyPeerTracker, final RIBSupportContextRegistry registry, final PeerRole peerRole,
         @Nonnull final PerTableTypeRouteCounter adjRibInRouteCounters, @Nonnull Set<TablesKey> tables) {
+        // 根据peerRole, 映射peer到import policy(映射)
         importPolicyPeerTracker.peerRoleChanged(peerIId, peerRole);
+        // 获取peer对应policy类：PolicyDatabase存储了映射规则
         this.importPolicy = importPolicyPeerTracker.policyFor(IdentifierUtils.peerId((NodeIdentifierWithPredicates) peerIId.getLastPathArgument()));
+
+        // 实例化adjInTracker
         this.adjInTracker = new AdjInTracker(service, registry, chain, peerIId, adjRibInRouteCounters, tables);
     }
 

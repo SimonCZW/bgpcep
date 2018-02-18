@@ -38,6 +38,7 @@ final class PolicyDatabase {
         return this.exportPolicies.get(peerRole);
     }
 
+    // 在这里实现不同peerRole：ebgp/igbp/rr-client/internal对应规则的映射
     AbstractImportPolicy importPolicyForRole(final PeerRole peerRole) {
         /*
          * TODO: this solution does not share equivalent attributes across

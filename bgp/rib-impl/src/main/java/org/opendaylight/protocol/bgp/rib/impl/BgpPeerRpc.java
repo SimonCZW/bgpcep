@@ -27,6 +27,7 @@ import org.opendaylight.yangtools.yang.common.RpcResultBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+// 在BGPPeer onSessionUp中注册此类为rpc
 public class BgpPeerRpc implements BgpPeerRpcService {
 
     private static final Logger LOG = LoggerFactory.getLogger(BgpPeerRpc.class);
@@ -40,6 +41,7 @@ public class BgpPeerRpc implements BgpPeerRpcService {
         this.supportedFamilies = Preconditions.checkNotNull(supportedFamilies);
     }
 
+    // rpc
     @Override
     public Future<RpcResult<Void>> routeRefreshRequest(final RouteRefreshRequestInput input) {
         final ChannelFuture f = sendRRMessage(input);
@@ -59,6 +61,7 @@ public class BgpPeerRpc implements BgpPeerRpcService {
             LOG.info("Unsupported afi/safi: {}, {}.", input.getAfi(), input.getSafi());
             return null;
         }
+        // build 路由刷新消息
         final RouteRefresh msg = new RouteRefreshBuilder().setAfi(input.getAfi()).setSafi(input.getSafi()).build();
         return ((BGPSessionImpl) this.session).getLimiter().writeAndFlush(msg);
     }

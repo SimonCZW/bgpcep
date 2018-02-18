@@ -65,11 +65,14 @@ abstract class BaseAbstractRouteEntry extends AbstractRouteEntry {
         return this.offsets.isEmpty();
     }
 
+    // select Best
+    //  在loc-rib-writer中调用入口
     @Override
     public final boolean selectBest(final long localAs) {
         /*
          * FIXME: optimize flaps by making sure we consider stability of currently-selected route.
          */
+        // 实例化base path selector
         final BasePathSelector selector = new BasePathSelector(localAs);
 
         // Select the best route.
@@ -77,17 +80,21 @@ abstract class BaseAbstractRouteEntry extends AbstractRouteEntry {
             final UnsignedInteger routerId = this.offsets.getRouterKey(i);
             final ContainerNode attributes = this.offsets.getValue(this.values, i);
             LOG.trace("Processing router id {} attributes {}", routerId, attributes);
+            // 从entry的offsets取出路由处理path
             selector.processPath(routerId, attributes);
         }
 
         // Get the newly-selected best path.
         final BaseBestPath newBestPath = selector.result();
+        // 判断是否有修改,如果bestPath改变了则存最新最优的，并返回boolean
         final boolean modified = newBestPath == null || !newBestPath.equals(this.bestPath);
         if (modified) {
             if(this.offsets.isEmpty()) {
+                // modified为true, 即有更改, 把removedBestPath定义为现在的bestPath（旧的)
                 this.removedBestPath = this.bestPath;
             }
             LOG.trace("Previous best {}, current best {}", this.bestPath, newBestPath);
+            // 定义新的bestPath
             this.bestPath = newBestPath;
         }
         return modified;
@@ -100,13 +107,16 @@ abstract class BaseAbstractRouteEntry extends AbstractRouteEntry {
         return addRoute(routerId, advertisedAttrs);
     }
 
+    // 更新路由信息
     @Override
     public void updateRoute(final TablesKey localTK, final ExportPolicyPeerTracker peerPT, final YangInstanceIdentifier locRibTarget, final RIBSupport ribSup,
         final DOMDataWriteTransaction tx, final PathArgument routeIdPA) {
+        // 在selectBest方法调用的时候，有更优路由，会把旧的bestPath赋值到removedBestPath
         if (this.removedBestPath != null) {
             removePathFromDataStore(this.removedBestPath, routeIdPA, locRibTarget, peerPT, localTK, ribSup, tx);
             this.removedBestPath = null;
         }
+        // selectBest中会赋值
         if (this.bestPath != null) {
             addPathToDataStore(this.bestPath, routeIdPA, locRibTarget, ribSup, peerPT, localTK, tx);
         }
@@ -161,6 +171,7 @@ abstract class BaseAbstractRouteEntry extends AbstractRouteEntry {
         return this.offsets;
     }
 
+    // 过 export policy，再写路由到adj-rib-out
     @VisibleForTesting
     private void fillAdjRibsOut(final ContainerNode attributes, final NormalizedNode<?, ?> value,
         final PathArgument routeId, final PeerId routePeerId, final ExportPolicyPeerTracker peerPT,
@@ -174,9 +185,13 @@ abstract class BaseAbstractRouteEntry extends AbstractRouteEntry {
          * if we have two eBGP peers, for example, there is no reason why we should perform the translation
          * multiple times.
          */
+        // 轮询所有peerRole, 并获取其对应peerGroup，
         for (final PeerRole role : PeerRole.values()) {
+            // exprot policy peer tarcker记录了需要export的peer信息
+            // 这里会找到 bgpPeer(如果是applicationPeer发路由)
             final PeerExportGroup peerGroup = peerPT.getPeerGroup(role);
             if (peerGroup != null) {
+                // 过滤export policy规则
                 final ContainerNode effAttrib = peerGroup.effectiveAttributes(getRoutePeerIdRole(peerPT, routePeerId),
                     attributes);
                 peerGroup.forEach((destPeer, rootPath) -> {
